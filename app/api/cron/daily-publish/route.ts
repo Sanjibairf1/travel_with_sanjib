@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { freeDailyContent } from '@/lib/free-daily-library';
+import { generateOfficialChronicle } from '@/lib/automated-chronicle';
 
 const dateInTimezone = (timezone: string) => new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
 const dayNumber = (date: string, start: string) => Math.floor((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000);
@@ -39,9 +40,13 @@ export async function GET(request: NextRequest) {
   let chronicleStatus = 'not due today';
   if (daily.chronicle) {
     const time = String(values.publishing?.chronicles_time || '19:00');
+    const storyNumber = Math.floor(index / 3) + 1;
+    const generatedChronicle = await generateOfficialChronicle(storyNumber);
+    const chronicle = generatedChronicle || daily.chronicle;
     const publishedAt = new Date(`${date}T${time}:00+05:30`).toISOString();
-    const enrichedMedia = await relatedCommonsImages(daily.chronicle.title, daily.chronicle.media);
-    const { error: chronicleError } = await supabase.from('chronicles').upsert({ ...daily.chronicle, media: enrichedMedia, status: 'published', published_at: publishedAt, automation_key: daily.key }, { onConflict: 'automation_key', ignoreDuplicates: true });
+    const enrichedMedia = await relatedCommonsImages(chronicle.title, chronicle.media.length ? chronicle.media : daily.chronicle.media);
+    const automationKey = generatedChronicle ? `official-story-${date}` : daily.key;
+    const { error: chronicleError } = await supabase.from('chronicles').upsert({ ...chronicle, media: enrichedMedia, status: 'published', published_at: publishedAt, automation_key: automationKey }, { onConflict: 'automation_key', ignoreDuplicates: true });
     chronicleStatus = chronicleError ? chronicleError.message : 'published';
   }
   // The official-source incident worker is optional and only runs when News
