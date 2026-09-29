@@ -19,6 +19,49 @@ async function relatedCommonsImages(title: string, fallback: string[]) {
   } catch { return fallback; }
 }
 
+
+const decodeXml = (value: string) => value
+  .replace(/<!\\[CDATA\\[|\\]\\]>/g, '')
+  .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+
+const plainText = (value: string) => decodeXml(value)
+  .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')
+  .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')
+  .replace(/<[^>]+>/g, ' ')
+  .replace(/\\s+/g, ' ').trim();
+
+async function officialNtsbStory(storyNumber: number) {
+  try {
+    const feedUrl = 'https://www.ntsb.gov/_layouts/feed.aspx?page=674e62a9-4f3b-4058-846b-150bc1c21aa0&pageurl=%2FPages%2FRSS-Feed-Page.aspx&web=%2F&wp=a19255e2-c8e3-41fd-8c99-f8bc0453cb58&xsl=1';
+    const feed = await fetch(feedUrl, { cache: 'no-store', headers: { 'user-agent': 'TravelWithSanjib/1.0' } });
+    if (!feed.ok) return null;
+    const xml = await feed.text();
+    const items = [...xml.matchAll(/<item\\b[\\s\\S]*?<\\/item>/gi)].map(match => match[0]);
+    const parsed = items.map(item => ({
+      title: plainText(item.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || ''),
+      link: decodeXml(item.match(/<link[^>]*>([\\s\\S]*?)<\\/link>/i)?.[1] || '').trim(),
+      description: plainText(item.match(/<description[^>]*>([\\s\\S]*?)<\\/description>/i)?.[1] || ''),
+    })).filter(item => item.title && item.link && /aviation|aircraft|airplane|flight|pilot|helicopter|airport|runway|airline/i.test(item.title + ' ' + item.description));
+    if (!parsed.length) return null;
+    const picked = parsed[(Math.max(1, storyNumber) - 1) % parsed.length];
+    const page = await fetch(picked.link, { cache: 'no-store', headers: { 'user-agent': 'TravelWithSanjib/1.0' } });
+    const html = page.ok ? await page.text() : '';
+    const pageText = plainText(html);
+    const useful = pageText.length >= 500 ? pageText.slice(0, 6500) : picked.description;
+    if (useful.length < 180) return null;
+    const lesson = 'LESSON\\nOfficial investigation material is most useful when we focus on the chain of events, contributing factors and safety actions—not on blame or speculation.';
+    return {
+      kind: 'story' as const,
+      title: picked.title,
+      excerpt: (picked.description || useful).slice(0, 320),
+      body: useful + '\\n\\n' + lesson + '\\n\\nOfficial source: ' + picked.link,
+      media: [] as string[],
+      sourceUrl: picked.link,
+    };
+  } catch { return null; }
+}
+
 export async function GET(request: NextRequest) {
   if (request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL; const key = process.env.SUPABASE_SECRET_KEY;
@@ -39,9 +82,15 @@ export async function GET(request: NextRequest) {
   let chronicleStatus = 'not due today';
   if (daily.chronicle) {
     const time = String(values.publishing?.chronicles_time || '19:00');
+    const storyNumber = Math.floor(index / 3) + 1;
+    const sourcedStory = await officialNtsbStory(storyNumber);
+    const chronicle = sourcedStory || daily.chronicle;
     const publishedAt = new Date(`${date}T${time}:00+05:30`).toISOString();
-    const enrichedMedia = await relatedCommonsImages(daily.chronicle.title, daily.chronicle.media);
-    const { error: chronicleError } = await supabase.from('chronicles').upsert({ ...daily.chronicle, media: enrichedMedia, status: 'published', published_at: publishedAt, automation_key: daily.key }, { onConflict: 'automation_key', ignoreDuplicates: true });
+    const fallbackMedia = daily.chronicle.media;
+    const enrichedMedia = await relatedCommonsImages(chronicle.title, chronicle.media.length ? chronicle.media : fallbackMedia);
+    const { sourceUrl: _sourceUrl, ...storyRow } = chronicle as typeof chronicle & { sourceUrl?: string };
+    const automationKey = sourcedStory ? 'ntsb-story-' + date : daily.key;
+    const { error: chronicleError } = await supabase.from('chronicles').upsert({ ...storyRow, media: enrichedMedia, status: 'published', published_at: publishedAt, automation_key: automationKey }, { onConflict: 'automation_key', ignoreDuplicates: true });
     chronicleStatus = chronicleError ? chronicleError.message : 'published';
   }
   // The official-source incident worker is optional and only runs when News
