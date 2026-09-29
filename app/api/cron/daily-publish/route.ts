@@ -13,7 +13,9 @@ async function relatedCommonsImages(title: string, fallback: string[]) {
     if (!response.ok) return fallback;
     const payload = await response.json() as { query?: { pages?: Record<string, { imageinfo?: Array<{ thumburl?: string; url?: string }> }> } };
     const urls = Object.values(payload.query?.pages || {}).flatMap(page => page.imageinfo?.[0]?.thumburl || page.imageinfo?.[0]?.url || []).filter(Boolean);
-    return urls.length ? [...urls.slice(0, 3), ...fallback].slice(0, 3) : fallback;
+    // Use the curated story images unless Commons produced a complete set.
+    // This avoids mixing a single possibly unrelated search result into a story.
+    return urls.length >= 3 ? urls.slice(0, 3) : fallback;
   } catch { return fallback; }
 }
 
