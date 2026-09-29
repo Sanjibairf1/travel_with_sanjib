@@ -1,0 +1,3 @@
+'use client';
+import {useEffect,useState} from 'react'; import {createClient} from '@/lib/supabase';
+export function MaintenanceGate({children}:{children:React.ReactNode}){const [maintenance,setMaintenance]=useState(false);useEffect(()=>{createClient()?.rpc('get_public_app_status').then(({data})=>setMaintenance(Boolean((data as {enabled?:boolean}|null)?.enabled)))},[]);return maintenance?<main className="page flex min-h-screen items-center justify-center text-center"><div><p className="eyebrow">Maintenance mode</p><h1 className="mt-3 text-3xl font-bold">We’re upgrading the skies!</h1><p className="mt-4 text-cloud">Travel With Sanjib will be back shortly. Thank you for your patience.</p></div></main>:<>{children}</>}
