@@ -35,9 +35,18 @@ async function sourceFromNtsb(seed: number) {
   return items[Math.abs(seed) % items.length];
 }
 
-function outputText(payload: any): string {
-  if (typeof payload?.output_text === 'string') return payload.output_text;
-  for (const item of payload?.output || []) for (const part of item?.content || []) if (part?.type === 'output_text' && typeof part.text === 'string') return part.text;
+type OpenAIResponsePayload = {
+  output_text?: string;
+  output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+};
+
+function outputText(payload: OpenAIResponsePayload): string {
+  if (typeof payload.output_text === 'string') return payload.output_text;
+  for (const item of payload.output || []) {
+    for (const part of item.content || []) {
+      if (part.type === 'output_text' && typeof part.text === 'string') return part.text;
+    }
+  }
   return '';
 }
 
