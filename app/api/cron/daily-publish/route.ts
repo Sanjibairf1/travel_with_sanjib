@@ -34,8 +34,7 @@ export async function GET(request: NextRequest) {
   if (index < 0) return NextResponse.json({ message: 'Daily content schedule has not started yet', day: index + 1 });
   const daily = freeDailyContent(index);
   const quizRows = daily.questions.map((question, i) => ({ ...question, difficulty: `${question.difficulty}-${String(i + 1).padStart(2, '0')}`, quiz_date: date, is_published: true }));
-  // Existing schema has a unique (quiz_date,difficulty) key. A numbered suffix
-  // lets us safely publish ten automatic questions without a database migration.
+  // Numbered difficulty values keep all ten daily questions unique while preserving the easy/medium/hard level prefix.
   const { error: quizError } = await supabase.from('quiz_questions').upsert(quizRows, { onConflict: 'quiz_date,difficulty', ignoreDuplicates: true });
   let chronicleStatus = 'not due today';
   if (daily.chronicle) {
