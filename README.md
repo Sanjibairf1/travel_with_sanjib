@@ -56,3 +56,5 @@ Before public production launch, verify the live Supabase schema and constraints
 
 ## Instagram / Flight Deck tracking
 Use `/?src=instagram` as the Instagram bio destination and `/challenge?src=flightdeck` for Sky Challenge links posted in The Flight Deck. The admin Analytics page counts website visits, challenge views, starts, completions, shares, and these source-tagged visits through the existing `analytics_events` table.
+
+<!-- Vercel Git integration check: 2026-09-30 -->
