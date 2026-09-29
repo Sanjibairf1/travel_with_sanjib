@@ -5,10 +5,10 @@ Mobile-first aviation companion built with Next.js App Router, TypeScript, Tailw
 ## Included
 
 - Premium mobile-first home, bottom navigation, daily Sky Challenge, public leaderboard, Flight Chronicles, Aviation News, admin dashboard and clickable analytics page.
-- Timed three-question quiz experience with feedback, explanations, replay state, scoring, and guest-to-account save prompt.
+- Timed ten-question daily quiz experience with feedback, explanations, replay state, scoring, and guest-to-account save prompt.
 - Full Supabase migration with the requested tables, RLS, role guard function, settings defaults, moderation/reporting entities, news updates and suspensions.
 - Configurable settings model for timezone, schedules, scoring, approval windows, moderation, maintenance and automation state. Chronicle default is 19:00 `Asia/Kolkata`.
-- Content/news automation is intentionally **not connected or claimed live**. The admin dashboard calls this out.
+- Daily quiz, Chronicle scheduling, and sourced-news collection are implemented through protected cron routes. Production still requires the documented Supabase tables/settings and Vercel environment variables.
 
 ## Run locally
 
@@ -50,9 +50,9 @@ Schedule daily Supabase backups/PITR according to the chosen Supabase plan, expo
 
 Push to a Git provider and import into Vercel. Add the variables from `.env.example` in Vercel Project Settings, set the production auth URLs in Supabase, apply the migration, then run the build command. Add a custom logo by replacing the plane mark in `components/app-header.tsx` and `app/admin/login/page.tsx`.
 
-## Production work remaining
+## Production checks remaining
 
-The user-facing UI is complete for the MVP demo. Before public production launch, wire the Supabase client and server auth, use official source APIs/licences for news, supply sound files/assets and an accessible audio controller, add a real share implementation, add comment/reply screens, and connect the admin controls to protected server actions. These are intentionally not faked in this repository.
+Before public production launch, verify the live Supabase schema and constraints against the 10-question format, confirm leaderboard scoring accepts the wider score range, and test the protected cron routes with Vercel environment variables. News uses sourced links and image fallbacks. Long-form Chronicles currently rotate a curated, researched story library; adding genuinely new verified stories indefinitely requires a trusted research/generation source rather than inventing historical events.
 
 ## Instagram / Flight Deck tracking
 Use `/?src=instagram` as the Instagram bio destination and `/challenge?src=flightdeck` for Sky Challenge links posted in The Flight Deck. The admin Analytics page counts website visits, challenge views, starts, completions, shares, and these source-tagged visits through the existing `analytics_events` table.
