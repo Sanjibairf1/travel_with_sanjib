@@ -35,47 +35,45 @@ async function sourceFromNtsb(seed: number) {
   return items[Math.abs(seed) % items.length];
 }
 
-type OpenAIResponsePayload = {
-  output_text?: string;
-  output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+type GeminiPayload = {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
 };
 
-function outputText(payload: OpenAIResponsePayload): string {
-  if (typeof payload.output_text === 'string') return payload.output_text;
-  for (const item of payload.output || []) {
-    for (const part of item.content || []) {
-      if (part.type === 'output_text' && typeof part.text === 'string') return part.text;
-    }
-  }
-  return '';
+function geminiText(payload: GeminiPayload) {
+  return (payload.candidates?.[0]?.content?.parts || []).map(part => part.text || '').join('').trim();
 }
 
 export async function generateOfficialChronicle(seed: number): Promise<GeneratedChronicle | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   try {
     const source = await sourceFromNtsb(seed);
     if (!source) return null;
-    const response = await fetch('https://api.openai.com/v1/responses', {
+    const prompt = `Write a factual aviation Chronicle only from the supplied official NTSB material. Do not invent names, dates, aircraft, causes, findings, casualties, quotations or recommendations. If the source does not support a detail, omit it. Write for general aviation enthusiasts in clear English. The body must be a substantial multi-paragraph story and end with a section headed LESSON. Explicitly identify NTSB as the official source and include the supplied source URL. Return ONLY valid JSON with exactly these string fields: title, excerpt, body.\n\nOfficial NTSB material:\n${JSON.stringify(source)}`;
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
-      headers: { authorization: 'Bearer ' + apiKey, 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-5-mini',
-        input: [
-          { role: 'system', content: 'Write a factual aviation Chronicle only from the supplied official NTSB material. Do not invent names, dates, aircraft, causes, findings, casualties, quotations or recommendations. If the source does not support a detail, omit it. Write for general aviation enthusiasts in clear English. The body must be a substantial multi-paragraph story and end with a section headed LESSON. Explicitly identify NTSB as the official source and include the supplied source URL.' },
-          { role: 'user', content: JSON.stringify(source) }
-        ],
-        text: { format: { type: 'json_schema', name: 'aviation_chronicle', strict: true, schema: {
-          type: 'object', additionalProperties: false,
-          properties: { title: { type: 'string' }, excerpt: { type: 'string' }, body: { type: 'string' } },
-          required: ['title','excerpt','body']
-        } } },
-        max_output_tokens: 2600
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              title: { type: 'STRING' },
+              excerpt: { type: 'STRING' },
+              body: { type: 'STRING' }
+            },
+            required: ['title', 'excerpt', 'body']
+          },
+          maxOutputTokens: 2600,
+          temperature: 0.2
+        }
       })
     });
     if (!response.ok) return null;
-    const payload = await response.json();
-    const raw = outputText(payload);
+    const payload = await response.json() as GeminiPayload;
+    const raw = geminiText(payload);
     if (!raw) return null;
     const story = JSON.parse(raw) as { title: string; excerpt: string; body: string };
     if (!story.title || !story.excerpt || !story.body || story.body.length < 900) return null;
