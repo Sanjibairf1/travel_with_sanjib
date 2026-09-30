@@ -1,16 +1,134 @@
 'use client';
-import Link from 'next/link'; import {useEffect,useState} from 'react'; import {Clock,Flame,Play,Share2,Volume2} from 'lucide-react'; import {AppHeader} from '@/components/app-header'; import {trackEvent} from '@/lib/analytics'; import {VisitTracker} from '@/components/visit-tracker'; import {BottomNav} from '@/components/bottom-nav'; import {leaderboard} from '@/lib/demo-data'; import {createClient} from '@/lib/supabase';
-type Stage='rules'|'quiz'|'feedback'|'complete'; type Row={name:string;score:number;streak:number};
-const REPLAY_MESSAGE='Your first attempt was already saved. This replay does not add points.';
-export default function Challenge(){const [stage,setStage]=useState<Stage>('rules'),[index,setIndex]=useState(0),[seconds,setSeconds]=useState(15),[choice,setChoice]=useState<number|null>(null),[score,setScore]=useState(0),[tab,setTab]=useState('Weekly'),[saved,setSaved]=useState(''),[alreadyCounted,setAlreadyCounted]=useState(false),[signedIn,setSignedIn]=useState(false),[board,setBoard]=useState<Row[]>([]),[boardRefresh,setBoardRefresh]=useState(0),[questions,setQuestions]=useState<Array<{id:string;difficulty:'Easy'|'Medium'|'Hard';question:string;options:string[];answer:number;explanation:string}>>([]),[quizMessage,setQuizMessage]=useState('Loading today’s 10 questions…');const q=questions[index];
-function tone(freq:number,duration:number){try{const Audio=window.AudioContext||((window as unknown as {webkitAudioContext:typeof AudioContext}).webkitAudioContext);const ctx=new Audio();const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=freq;g.gain.setValueAtTime(.06,ctx.currentTime);g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+duration);o.connect(g).connect(ctx.destination);o.start();o.stop(ctx.currentTime+duration)}catch{}}
-useEffect(()=>{if(stage!=='quiz')return;if(seconds===0){setStage('feedback');return}if(seconds<=5)tone(880,.07);const timer=setTimeout(()=>setSeconds(s=>s-1),1000);return()=>clearTimeout(timer)},[seconds,stage]);
-useEffect(()=>{const supabase=createClient();if(!supabase)return;const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());supabase.from('quiz_questions').select('id,difficulty,prompt,options,correct_answer,explanation').eq('quiz_date',date).eq('is_published',true).order('difficulty').then(({data})=>{if(data?.length>=10){const mapped=data.slice(0,10).map((r:{id:string;difficulty:string;prompt:string;options:string[];correct_answer:number;explanation:string})=>{const base=r.difficulty.split('-')[0];return {id:r.id,difficulty:(base[0].toUpperCase()+base.slice(1)) as 'Easy'|'Medium'|'Hard',question:r.prompt,options:r.options,answer:r.correct_answer,explanation:r.explanation}});setQuestions(mapped);setQuizMessage('')}else setQuizMessage('Today’s 10-question challenge is being prepared. Please check back shortly.');});},[]);
-useEffect(()=>{const supabase=createClient();if(!supabase)return;const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());supabase.auth.getUser().then(({data:{user}})=>{setSignedIn(Boolean(user));if(!user)return;supabase.from('quiz_daily_sessions').select('id').eq('user_id',user.id).eq('quiz_date',date).not('first_score','is',null).maybeSingle().then(({data})=>setAlreadyCounted(Boolean(data)))})},[]);
-useEffect(()=>{const supabase=createClient();if(!supabase)return;const period=tab==='All-Time'?'all-time':tab.toLowerCase();supabase.rpc('get_leaderboard',{p_period:period}).then(({data,error})=>{const savedBoard=error?[]:(data||[]).map((r:{username:string;score:number;streak:number})=>({name:r.username,score:Number(r.score),streak:r.streak}));setBoard(savedBoard.length?savedBoard:(signedIn?[]:leaderboard))})},[tab,boardRefresh,signedIn]);
-function startChallenge(){if(questions.length!==10)return;void trackEvent('challenge_start');setStage('quiz')}
-function answer(i:number){setChoice(i);tone(i===q.answer?1040:220,i===q.answer ? .18 : .28);setScore(s=>s+(i===q.answer?10:-5));setStage('feedback')}
-async function saveScore(finalScore:number){const supabase=createClient();if(!supabase){setSaved('Supabase is not configured.');return}const {data:{user}}=await supabase.auth.getUser();if(!user){setSaved('Sign in to save your first score to the leaderboard.');return}if(alreadyCounted){setSaved(REPLAY_MESSAGE);return}const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());const {data,error}=await supabase.rpc('claim_daily_quiz_score',{p_score:finalScore,p_quiz_date:date});if(error)setSaved('Your score could not be saved. Please try again.');else if(data){setAlreadyCounted(true);setSaved('First score saved to the leaderboard.');setBoardRefresh(v=>v+1)}else{setAlreadyCounted(true);setSaved(REPLAY_MESSAGE);setBoardRefresh(v=>v+1)}}
-function next(){if(index===questions.length-1){setStage('complete');void trackEvent('challenge_complete');void saveScore(score)}else{setIndex(i=>i+1);setSeconds(15);setChoice(null);setStage('quiz')}}
-async function shareChallenge(){void trackEvent('challenge_share');const text=`I scored ${score}/100 on Travel with Sanjib’s Sky Challenge. Can you beat my score?`;const url=`${window.location.origin}/challenge?src=share`;try{if(navigator.share)await navigator.share({title:'Sky Challenge',text,url});else{await navigator.clipboard.writeText(`${text} ${url}`);setSaved('Challenge link copied. Share it with your friends!')}}catch{}}
-return <main className="page"><AppHeader/><VisitTracker eventName="challenge_view"/>{stage==='rules'&&<section><p className="eyebrow">Today’s flight plan</p><h1 className="mt-2 text-3xl font-bold">Sky Challenge</h1><div className="card mt-6 p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-sky/15 p-3 text-sky"><Flame/></div><div><p className="font-bold">10 questions. 15 seconds each.</p><p className="text-sm text-[#AFC3D6]">Maximum 100 points today</p></div></div><ul className="mt-5 space-y-3 text-sm text-[#C3D4E4]"><li>• Correct: +10 · Wrong: −5 · Timeout: 0.</li><li>• Your first attempt counts for the leaderboard.</li><li>• Replays are for learning and never add points.</li></ul></div>{quizMessage&&<p className="mt-4 rounded-xl bg-sky/10 p-3 text-sm text-sky">{quizMessage}</p>}<button disabled={questions.length!==10} onClick={startChallenge} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-sky py-4 font-bold text-ink disabled:cursor-not-allowed disabled:opacity-50"><Play size={18} fill="currentColor"/> {questions.length===10?'Start today’s challenge':'Preparing today’s challenge'}</button></section>}{(stage==='quiz'||stage==='feedback')&&<section><div className="mb-7 flex justify-between text-xs text-[#AFC3D6]"><span>QUESTION {index+1} OF {questions.length}</span><span className="font-bold text-sky">{q.difficulty.toUpperCase()}</span></div><div className="mb-7 flex items-center justify-between"><div className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-sky text-xl font-bold"><Clock size={16} className="mr-1"/>{seconds}</div><span className="flex gap-1 text-xs text-[#91A9C2]"><Volume2 size={15}/>sound on</span></div><h1 className="text-2xl font-bold leading-tight">{q.question}</h1><div className="mt-7 space-y-3">{q.options.map((o,i)=>{const reveal=stage==='feedback',correct=i===q.answer,picked=i===choice;return <button disabled={reveal} onClick={()=>answer(i)} key={o} className={'w-full rounded-2xl border p-4 text-left text-sm '+(reveal&&correct?'border-[#4FD398] bg-[#1D5A4A]':reveal&&picked?'border-[#EE6C6C] bg-[#542B39]':'border-line bg-panel')}>{String.fromCharCode(65+i)}. {o}</button>})}</div>{stage==='feedback'&&<div className="card mt-5 p-5"><p className={'font-bold '+(choice===q.answer?'text-[#61E2A6]':'text-[#FF8E8E]')}>{choice===null?'Time’s up':choice===q.answer?'Correct! +10 points':'Not quite.'}</p><p className="mt-2 text-sm leading-6 text-[#C3D4E4]">{q.explanation}</p><button onClick={next} className="mt-4 w-full rounded-xl bg-sky py-3 text-sm font-bold text-ink">{index===questions.length-1?'See results':'Next question'}</button></div>}</section>}{stage==='complete'&&<section className="text-center"><div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-sky/15 text-sky"><Flame size={35}/></div><p className="eyebrow mt-5">Flight complete</p><h1 className="mt-2 text-4xl font-bold">{score} / 100</h1><p className="mt-2 text-sm text-[#AFC3D6]">{saved||'Saving your first attempt…'}</p>{!signedIn&&<Link href="/account" className="mt-5 block w-full rounded-2xl bg-sky py-4 font-bold text-ink">Sign in to save score</Link>}<button onClick={shareChallenge} className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-sky py-3 text-sm font-bold text-ink"><Share2 size={16}/> Challenge your friends</button><button onClick={()=>{setIndex(0);setScore(0);setSaved('');setStage('rules')}} className="mt-3 w-full rounded-2xl border border-line py-3 text-sm">Replay for learning</button></section>}<section className="mt-10"><div className="flex items-end justify-between"><div><p className="eyebrow">Public leaderboard</p><h2 className="mt-1 text-xl font-bold">This {tab.toLowerCase()}</h2></div><span className="text-xs text-[#91A9C2]">Top 20</span></div><div className="mt-4 flex rounded-xl bg-panel p-1">{['Weekly','Monthly','All-Time'].map(t=><button key={t} onClick={()=>setTab(t)} className={'flex-1 rounded-lg py-2 text-xs '+(tab===t?'bg-[#284A6B] font-bold':'text-[#91A9C2]')}>{t}</button>)}</div><div className="mt-3 card overflow-hidden">{board.map((x,i)=><div key={x.name+i} className="flex items-center gap-3 border-b border-line px-4 py-3 last:border-0"><span className="w-5 text-sm text-sky">{i+1}</span><span className="flex-1 text-sm font-medium">{x.name}</span><span className="text-xs text-[#91A9C2]">{x.streak} 🔥</span><b className="text-sm">{x.score}</b></div>)}</div><p className="mt-2 text-xs text-[#718AA5]">Ties rank by the earliest score achieved.</p></section><BottomNav/></main>}
+
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { Clock, Flame, Play, Share2, Volume2 } from 'lucide-react';
+import { AppHeader } from '@/components/app-header';
+import { trackEvent } from '@/lib/analytics';
+import { VisitTracker } from '@/components/visit-tracker';
+import { BottomNav } from '@/components/bottom-nav';
+import { leaderboard } from '@/lib/demo-data';
+import { createClient } from '@/lib/supabase';
+
+type Stage = 'rules' | 'quiz' | 'feedback' | 'complete';
+type Row = { name: string; score: number; streak: number };
+type Question = { id: string; difficulty: 'Easy' | 'Medium' | 'Hard'; question: string; options: string[]; answer: number; explanation: string };
+type DbQuestion = { id: string; difficulty: string; prompt: string; options: string[]; correct_answer: number; explanation: string };
+
+const REPLAY_MESSAGE = 'Your first attempt was already saved. This replay does not add points.';
+
+export default function Challenge() {
+  const [stage, setStage] = useState<Stage>('rules');
+  const [index, setIndex] = useState(0);
+  const [seconds, setSeconds] = useState(15);
+  const [choice, setChoice] = useState<number | null>(null);
+  const [score, setScore] = useState(0);
+  const [tab, setTab] = useState('Weekly');
+  const [saved, setSaved] = useState('');
+  const [alreadyCounted, setAlreadyCounted] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const [board, setBoard] = useState<Row[]>([]);
+  const [boardRefresh, setBoardRefresh] = useState(0);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [quizMessage, setQuizMessage] = useState('Loading today’s 10 questions…');
+  const q = questions[index];
+
+  function tone(freq: number, duration: number) {
+    try {
+      const Audio = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new Audio();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(.06, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + duration);
+      o.connect(g).connect(ctx.destination);
+      o.start();
+      o.stop(ctx.currentTime + duration);
+    } catch {}
+  }
+
+  useEffect(() => {
+    if (stage !== 'quiz') return;
+    if (seconds === 0) { setStage('feedback'); return; }
+    if (seconds <= 5) tone(880, .07);
+    const timer = setTimeout(() => setSeconds(s => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [seconds, stage]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    if (!supabase) return;
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    supabase.from('quiz_questions').select('id,difficulty,prompt,options,correct_answer,explanation').eq('quiz_date', date).eq('is_published', true).order('difficulty').then(({ data }) => {
+      const rows = (data ?? []) as DbQuestion[];
+      if (rows.length >= 10) {
+        const mapped: Question[] = rows.slice(0, 10).map(r => {
+          const base = r.difficulty.split('-')[0] || 'Easy';
+          const normalized = (base[0].toUpperCase() + base.slice(1)) as Question['difficulty'];
+          return { id: r.id, difficulty: normalized, question: r.prompt, options: r.options, answer: r.correct_answer, explanation: r.explanation };
+        });
+        setQuestions(mapped);
+        setQuizMessage('');
+      } else setQuizMessage('Today’s 10-question challenge is being prepared. Please check back shortly.');
+    });
+  }, []);
+
+  useEffect(() => {
+    const supabase = createClient();
+    if (!supabase) return;
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setSignedIn(Boolean(user));
+      if (!user) return;
+      supabase.from('quiz_daily_sessions').select('id').eq('user_id', user.id).eq('quiz_date', date).not('first_score', 'is', null).maybeSingle().then(({ data }) => setAlreadyCounted(Boolean(data)));
+    });
+  }, []);
+
+  useEffect(() => {
+    const supabase = createClient();
+    if (!supabase) return;
+    const period = tab === 'All-Time' ? 'all-time' : tab.toLowerCase();
+    supabase.rpc('get_leaderboard', { p_period: period }).then(({ data, error }) => {
+      const savedBoard: Row[] = error ? [] : ((data ?? []) as Array<{ username: string; score: number; streak: number }>).map(r => ({ name: r.username, score: Number(r.score), streak: r.streak }));
+      setBoard(savedBoard.length ? savedBoard : (signedIn ? [] : leaderboard));
+    });
+  }, [tab, boardRefresh, signedIn]);
+
+  function startChallenge() { if (questions.length !== 10) return; void trackEvent('challenge_start'); setStage('quiz'); }
+  function answer(i: number) { if (!q) return; setChoice(i); tone(i === q.answer ? 1040 : 220, i === q.answer ? .18 : .28); setScore(s => s + (i === q.answer ? 10 : -5)); setStage('feedback'); }
+
+  async function saveScore(finalScore: number) {
+    const supabase = createClient();
+    if (!supabase) { setSaved('Supabase is not configured.'); return; }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setSaved('Sign in to save your first score to the leaderboard.'); return; }
+    if (alreadyCounted) { setSaved(REPLAY_MESSAGE); return; }
+    const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    const { data, error } = await supabase.rpc('claim_daily_quiz_score', { p_score: finalScore, p_quiz_date: date });
+    if (error) setSaved('Your score could not be saved. Please try again.');
+    else if (data) { setAlreadyCounted(true); setSaved('First score saved to the leaderboard.'); setBoardRefresh(v => v + 1); }
+    else { setAlreadyCounted(true); setSaved(REPLAY_MESSAGE); setBoardRefresh(v => v + 1); }
+  }
+
+  function next() {
+    if (index === questions.length - 1) { setStage('complete'); void trackEvent('challenge_complete'); void saveScore(score); }
+    else { setIndex(i => i + 1); setSeconds(15); setChoice(null); setStage('quiz'); }
+  }
+
+  async function shareChallenge() {
+    void trackEvent('challenge_share');
+    const text = `I scored ${score}/100 on Travel with Sanjib’s Sky Challenge. Can you beat my score?`;
+    const url = `${window.location.origin}/challenge?src=share`;
+    try {
+      if (navigator.share) await navigator.share({ title: 'Sky Challenge', text, url });
+      else { await navigator.clipboard.writeText(`${text} ${url}`); setSaved('Challenge link copied. Share it with your friends!'); }
+    } catch {}
+  }
+
+  return <main className="page"><AppHeader/><VisitTracker eventName="challenge_view"/>
+    {stage === 'rules' && <section><p className="eyebrow">Today’s flight plan</p><h1 className="mt-2 text-3xl font-bold">Sky Challenge</h1><div className="card mt-6 p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-sky/15 p-3 text-sky"><Flame/></div><div><p className="font-bold">10 questions. 15 seconds each.</p><p className="text-sm text-[#AFC3D6]">Maximum 100 points today</p></div></div><ul className="mt-5 space-y-3 text-sm text-[#C3D4E4]"><li>• Correct: +10 · Wrong: −5 · Timeout: 0.</li><li>• Your first attempt counts for the leaderboard.</li><li>• Replays are for learning and never add points.</li></ul></div>{quizMessage && <p className="mt-4 rounded-xl bg-sky/10 p-3 text-sm text-sky">{quizMessage}</p>}<button disabled={questions.length !== 10} onClick={startChallenge} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-sky py-4 font-bold text-ink disabled:cursor-not-allowed disabled:opacity-50"><Play size={18} fill="currentColor"/> {questions.length === 10 ? 'Start today’s challenge' : 'Preparing today’s challenge'}</button></section>}
+    {(stage === 'quiz' || stage === 'feedback') && q && <section><div className="mb-7 flex justify-between text-xs text-[#AFC3D6]"><span>QUESTION {index + 1} OF {questions.length}</span><span className="font-bold text-sky">{q.difficulty.toUpperCase()}</span></div><div className="mb-7 flex items-center justify-between"><div className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-sky text-xl font-bold"><Clock size={16} className="mr-1"/>{seconds}</div><span className="flex gap-1 text-xs text-[#91A9C2]"><Volume2 size={15}/>sound on</span></div><h1 className="text-2xl font-bold leading-tight">{q.question}</h1><div className="mt-7 space-y-3">{q.options.map((o, i) => { const reveal = stage === 'feedback', correct = i === q.answer, picked = i === choice; return <button disabled={reveal} onClick={() => answer(i)} key={`${i}-${o}`} className={'w-full rounded-2xl border p-4 text-left text-sm ' + (reveal && correct ? 'border-[#4FD398] bg-[#1D5A4A]' : reveal && picked ? 'border-[#EE6C6C] bg-[#542B39]' : 'border-line bg-panel')}>{String.fromCharCode(65 + i)}. {o}</button>; })}</div>{stage === 'feedback' && <div className="card mt-5 p-5"><p className={'font-bold ' + (choice === q.answer ? 'text-[#61E2A6]' : 'text-[#FF8E8E]')}>{choice === null ? 'Time’s up' : choice === q.answer ? 'Correct! +10 points' : 'Not quite.'}</p><p className="mt-2 text-sm leading-6 text-[#C3D4E4]">{q.explanation}</p><button onClick={next} className="mt-4 w-full rounded-xl bg-sky py-3 text-sm font-bold text-ink">{index === questions.length - 1 ? 'See results' : 'Next question'}</button></div>}</section>}
+    {stage === 'complete' && <section className="text-center"><div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-sky/15 text-sky"><Flame size={35}/></div><p className="eyebrow mt-5">Flight complete</p><h1 className="mt-2 text-4xl font-bold">{score} / 100</h1><p className="mt-2 text-sm text-[#AFC3D6]">{saved || 'Saving your first attempt…'}</p>{!signedIn && <Link href="/account" className="mt-5 block w-full rounded-2xl bg-sky py-4 font-bold text-ink">Sign in to save score</Link>}<button onClick={shareChallenge} className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-sky py-3 text-sm font-bold text-ink"><Share2 size={16}/> Challenge your friends</button><button onClick={() => { setIndex(0); setScore(0); setSaved(''); setChoice(null); setSeconds(15); setStage('rules'); }} className="mt-3 w-full rounded-2xl border border-line py-3 text-sm">Replay for learning</button></section>}
+    <section className="mt-10"><div className="flex items-end justify-between"><div><p className="eyebrow">Public leaderboard</p><h2 className="mt-1 text-xl font-bold">This {tab.toLowerCase()}</h2></div><span className="text-xs text-[#91A9C2]">Top 20</span></div><div className="mt-4 flex rounded-xl bg-panel p-1">{['Weekly', 'Monthly', 'All-Time'].map(t => <button key={t} onClick={() => setTab(t)} className={'flex-1 rounded-lg py-2 text-xs ' + (tab === t ? 'bg-[#284A6B] font-bold' : 'text-[#91A9C2]')}>{t}</button>)}</div><div className="mt-3 card overflow-hidden">{board.map((x, i) => <div key={x.name + i} className="flex items-center gap-3 border-b border-line px-4 py-3 last:border-0"><span className="w-5 text-sm text-sky">{i + 1}</span><span className="flex-1 text-sm font-medium">{x.name}</span><span className="text-xs text-[#91A9C2]">{x.streak} 🔥</span><b className="text-sm">{x.score}</b></div>)}</div><p className="mt-2 text-xs text-[#718AA5]">Ties rank by the earliest score achieved.</p></section><BottomNav/></main>;
+}
